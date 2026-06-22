@@ -1,0 +1,29 @@
+# ===== 运行时数据（不入库，clone 后自行 ingest 生成）=====
+data/*
+!data/.gitkeep
+
+# ===== 本地 embedding 模型（约 2GB，单独下载，见 scripts/download_model.py）=====
+models/
+
+# ===== 密钥与本地配置 =====
+.env
+.env.local
+
+# ===== 运行时日志 / pid =====
+.run/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== 编辑器 / 系统 =====
+.idea/
+.vscode/
+.DS_Store

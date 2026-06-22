@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>云文档智能问答助手 · RAG Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        .chat-message {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .typing-indicator span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background-color: #9CA3AF;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+            margin: 0 1px;
+        }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        /* Custom Scrollbar for Sidebar */
+        #history-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        #history-list::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        #history-list::-webkit-scrollbar-thumb {
+            background: #d1d5db; 
+            border-radius: 2px;
+        }
+        #history-list::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af; 
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen font-sans overflow-hidden">
+
+    <div class="flex h-full">
+        <!-- Sidebar (History) -->
+        <div class="w-64 bg-white border-r border-gray-200 flex flex-col h-full flex-shrink-0 z-20 shadow-sm">
+            <div class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                <h2 class="font-semibold text-gray-700">会话历史</h2>
+                <span id="history-count" class="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">0</span>
+            </div>
+            <div id="history-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+                <!-- History items will be added here -->
+                <p class="text-xs text-gray-400 text-center mt-4 italic" id="empty-history-msg">还没有提问</p>
+            </div>
+            <div class="p-3 border-t border-gray-200 bg-gray-50">
+                <button onclick="clearChat()" class="w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors flex items-center justify-center gap-2 border border-transparent hover:border-red-100">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    清空历史
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="flex-1 flex flex-col h-full min-w-0 bg-gray-50 relative">
+            <!-- Header -->
+            <header class="bg-white shadow-sm px-6 py-4 flex justify-between items-center z-10 border-b border-gray-200">
+                <div class="flex items-center space-x-3">
+                    <div id="brand-avatar" class="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md">📄</div>
+                    <div>
+                        <h1 id="brand-name" class="text-xl font-bold text-gray-800 tracking-tight">云文档智能问答助手 · RAG Demo</h1>
+                        <p class="text-xs text-gray-500 flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+                            <span id="brand-tagline">基于 RAG 的文档问答演示</span>
+                        </p>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Chat Container -->
+            <main id="chat-container" class="flex-1 overflow-y-auto p-4 space-y-6 scroll-smooth pb-32">
+                <!-- Welcome Message -->
+                <div class="flex flex-col items-center justify-center mt-10 space-y-4 text-center opacity-90 transition-all duration-500" id="welcome-screen">
+                    <div class="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 mb-4 shadow-sm animate-bounce-slow">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                        </svg>
+                    </div>
+                    <h2 id="welcome-title" class="text-2xl font-bold text-gray-700">有什么可以帮你的？</h2>
+                    <p id="welcome-subtitle" class="text-gray-500 max-w-md">这是一个个人 RAG 实践 Demo，基于公开云产品文档构建，可帮你查配置、解释概念。回答由 AI 生成，仅供参考。</p>
+                    <!-- 预设问题由 UI_CONFIG.presets 在加载时填充 -->
+                    <div id="preset-grid" class="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-lg mt-6"></div>
+                </div>
+            </main>
+
+            <!-- Input Area -->
+            <div class="bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] absolute bottom-0 left-0 right-0 z-50 cursor-text" onclick="document.getElementById('user-input').focus()">
+                <div class="max-w-4xl mx-auto relative">
+                    <form id="chat-form" onsubmit="handleSubmit(event)" class="relative group">
+                        <input 
+                            type="text" 
+                            id="user-input" 
+                            class="w-full pl-4 pr-16 py-4 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-inner transition-all placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed caret-indigo-600"
+                            placeholder="输入你的问题，例如：人脸识别是什么？"
+                            autocomplete="off"
+                            autofocus
+                        >
+                        <!-- Char Counter -->
+                        <div id="char-count" class="absolute right-12 bottom-4 text-xs text-gray-400 font-mono transition-colors">0/500</div>
+                        
+                        <button 
+                            type="submit" 
+                            id="send-btn"
+                            class="absolute right-2 top-2 bottom-2 p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md group-hover:shadow-lg"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </form>
+                    <div class="text-center mt-2 flex justify-between items-center text-xs text-gray-400 px-2">
+                        <span>会话：<span id="session-display" class="font-mono text-gray-500"></span></span>
+                        <span>AI 可能会出错，请核实重要信息。</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 站点可配项（换文档站只改这里） ====================
+        // 这些文案与品牌相关；后端的助手人设/知识边界另在 .env 的
+        // ASSISTANT_NAME / KNOWLEDGE_SCOPE / EXAMPLE_QUESTIONS 配置。
+        const UI_CONFIG = {
+            assistantName: "云文档智能问答助手 · RAG Demo",
+            avatarText: "📄",
+            tagline: "基于 RAG 的文档问答演示",
+            welcomeTitle: "有什么可以帮你的？",
+            welcomeSubtitle: "这是一个个人 RAG 实践 Demo，基于公开云产品文档构建，可帮你查配置、解释概念。回答由 AI 生成，仅供参考。",
+            placeholder: "输入你的问题，例如：人脸识别是什么？",
+            presets: [
+                "人脸识别是什么？",
+                "人脸识别支持哪些功能？",
+                "人脸识别的计费方式是怎样的？",
+                "人脸识别有免费额度吗？",
+            ],
+        };
+
+        const chatContainer = document.getElementById('chat-container');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const historyList = document.getElementById('history-list');
+        const historyCount = document.getElementById('history-count');
+        const emptyHistoryMsg = document.getElementById('empty-history-msg');
+        const sessionDisplay = document.getElementById('session-display');
+        const charCount = document.getElementById('char-count');
+        const MAX_INPUT_LENGTH = 500;
+
+        // 把 UI_CONFIG 应用到页面（标题、品牌、欢迎语、预设问题、输入框提示）
+        function applyUiConfig() {
+            const c = UI_CONFIG;
+            document.title = c.assistantName;
+            document.getElementById('brand-avatar').textContent = c.avatarText;
+            document.getElementById('brand-name').textContent = c.assistantName;
+            document.getElementById('brand-tagline').textContent = c.tagline;
+            document.getElementById('welcome-title').textContent = c.welcomeTitle;
+            document.getElementById('welcome-subtitle').textContent = c.welcomeSubtitle;
+            userInput.placeholder = c.placeholder;
+            const grid = document.getElementById('preset-grid');
+            grid.innerHTML = '';
+            c.presets.forEach(q => {
+                const b = document.createElement('button');
+                b.className = 'p-3 bg-white border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 hover:shadow-md text-left text-sm text-gray-700 transition-all';
+                b.textContent = q;
+                b.onclick = () => sendPreset(q);
+                grid.appendChild(b);
+            });
+        }
+        applyUiConfig();
+
+        // Input Character Counter
+        userInput.addEventListener('input', function() {
+            const currentLength = this.value.length;
+            charCount.textContent = `${currentLength}/${MAX_INPUT_LENGTH}`;
+            
+            if (currentLength > MAX_INPUT_LENGTH) {
+                charCount.classList.remove('text-gray-400');
+                charCount.classList.add('text-red-500', 'font-bold');
+                userInput.classList.add('border-red-500', 'focus:ring-red-500');
+                userInput.classList.remove('focus:ring-indigo-500');
+            } else {
+                charCount.classList.add('text-gray-400');
+                charCount.classList.remove('text-red-500', 'font-bold');
+                userInput.classList.remove('border-red-500', 'focus:ring-red-500');
+                userInput.classList.add('focus:ring-indigo-500');
+            }
+        });
+
+        let isProcessing = false;
+        let questionCount = 0;
+        const feedbackState = {
+            submitted: {},
+            requestToQuery: {},
+            requestToBotId: {},
+            botSnapshot: {},
+        };
+        // 响应耗时：messageTimings[botMsgId] = {ttft 首字秒, total 总秒}
+        const messageTimings = {};
+        let activeTiming = null;
+        
+        // Session Management
+        let sessionId = sessionStorage.getItem('chat_session_id');
+        if (!sessionId) {
+            sessionId = 'sess-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15);
+            sessionStorage.setItem('chat_session_id', sessionId);
+        }
+        sessionDisplay.textContent = sessionId.substring(0, 12) + '...';
+        console.log('Current Session ID:', sessionId);
+
+        // Cleanup on page close/refresh
+        window.addEventListener('beforeunload', function() {
+            // 使用 navigator.sendBeacon 确保请求在页面关闭时发送
+            // 注意 sendBeacon 发送的是 POST，但我们需要 DELETE，或者后端支持 POST 处理清理
+            // 由于 sendBeacon 不支持 DELETE，我们尝试用 fetch + keepalive
+            // 或者我们可以修改后端接口支持 POST /chat/session/clear
+            // 为了兼容性，这里我们使用 fetch keepalive
+            
+            const url = `/api/v1/chat/session/${sessionId}`;
+            fetch(url, {
+                method: 'DELETE',
+                keepalive: true
+            }).catch(err => console.error('Cleanup failed:', err));
+        });
+
+        async function clearChat() {
+            if (confirm('确定要清空当前会话和历史记录吗？')) {
+                // 1. Clear UI
+                chatContainer.innerHTML = '';
+                chatContainer.appendChild(welcomeScreen);
+                welcomeScreen.classList.remove('hidden');
+                
+                // 2. Clear History Sidebar
+                historyList.innerHTML = '';
+                historyList.appendChild(emptyHistoryMsg);
+                emptyHistoryMsg.classList.remove('hidden');
+                questionCount = 0;
+                historyCount.textContent = 0;
+
+                // 3. Clear Backend History
+                try {
+                    await fetch(`/api/v1/chat/session/${sessionId}`, { method: 'DELETE' });
+                } catch (e) {
+                    console.error('Failed to clear backend history', e);
+                }
+                
+                // 4. Reset Session (Optional, user might prefer to keep session ID but clear data)
+                // sessionId = 'sess-' + Date.now() + '-' + Math.random().toString(36).substring(2, 15);
+                // sessionStorage.setItem('chat_session_id', sessionId);
+                // sessionDisplay.textContent = sessionId.substring(0, 12) + '...';
+            }
+        }
+
+        function addToHistory(text, messageId) {
+            if (questionCount === 0) {
+                emptyHistoryMsg.classList.add('hidden');
+            }
+            questionCount++;
+            historyCount.textContent = questionCount;
+
+            const btn = document.createElement('button');
+            btn.className = 'w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-md transition-colors truncate border border-transparent hover:border-indigo-100 mb-1';
+            btn.textContent = text;
+            btn.onclick = () => {
+                const el = document.getElementById(messageId);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('bg-yellow-50'); // Highlight effect
+                    setTimeout(() => el.classList.remove('bg-yellow-50'), 2000);
+                }
+            };
+            historyList.appendChild(btn);
+            // Auto scroll history to bottom
+            historyList.scrollTop = historyList.scrollHeight;
+        }
+
+        function sendPreset(text) {
+            userInput.value = text;
+            handleSubmit({ preventDefault: () => {} });
+        }
+
+        function appendUserMessage(text) {
+            welcomeScreen.classList.add('hidden');
+            const msgId = 'user-msg-' + Date.now();
+            
+            const div = document.createElement('div');
+            div.id = msgId;
+            div.className = 'chat-message flex justify-end mb-4 transition-colors duration-500 rounded-lg p-1';
+            div.innerHTML = `
+                <div class="bg-indigo-600 text-white px-5 py-3 rounded-2xl rounded-tr-none max-w-[80%] shadow-md">
+                    <p>${escapeHtml(text)}</p>
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+            
+            // Add to Sidebar
+            addToHistory(text, msgId);
+        }
+
+        function appendBotMessage(content, sources = [], requestId = null) {
+            // (Old non-streaming function, kept for compatibility if needed)
+        }
+
+        function showTypingIndicator() {
+            // ... (unused in streaming mode but good to keep)
+        }
+
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        // 清理文档标题尾部的站点后缀（如 "-文档中心-腾讯云"、"_腾讯云"），只留正文标题
+        function cleanSourceTitle(title) {
+            if (!title || /^https?:\/\//i.test(title)) return '';
+            return title
+                .replace(/[-_]\s*腾讯云\s*$/, '')
+                .replace(/[-_]\s*文档中心\s*$/, '')
+                .trim();
+        }
+
+        // 从 URL 提取尾段 slug 作为友好标题；失败回落到原 URL
+        function prettifySourceTitle(url) {
+            try {
+                const u = new URL(url);
+                const segs = u.pathname.split('/').filter(Boolean);
+                let last = segs[segs.length - 1] || u.hostname;
+                last = last.replace(/\.(html?|md|aspx?)$/i, '');
+                last = last.replace(/[-_]+/g, ' ').trim();
+                try {
+                    last = decodeURIComponent(last);
+                } catch (_) { /* 非 UTF-8 编码就不解 */ }
+                return last || url;
+            } catch (_) {
+                return url;
+            }
+        }
+
+        async function handleSubmit(e) {
+            e.preventDefault();
+            if (isProcessing) return;
+
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            // Client-side Length Validation
+            if (text.length > MAX_INPUT_LENGTH) {
+                alert(`输入过长！最多 ${MAX_INPUT_LENGTH} 个字符，当前 ${text.length} 个。`);
+                return;
+            }
+
+            // UI Updates
+            userInput.value = '';
+            charCount.textContent = `0/${MAX_INPUT_LENGTH}`; // Reset counter
+            userInput.disabled = true;
+            sendBtn.disabled = true;
+            isProcessing = true;
+            
+            appendUserMessage(text);
+            
+            // 创建一个临时的 bot message 容器用于流式更新
+            const botMessageId = 'bot-msg-' + Date.now();
+            createEmptyBotMessage(botMessageId);
+            activeTiming = { botMessageId, startTime: performance.now(), firstTokenTime: null };
+
+            try {
+                const url = `/api/v1/chat/stream?query=${encodeURIComponent(text)}`;
+                const urlWithSession = `${url}&session_id=${sessionId}`;
+                const eventSource = new EventSource(urlWithSession);
+                
+                let fullAnswer = '';
+                let sources = [];
+                let requestId = '';
+                let suggestedPrompts = [];
+
+                // 设置超时检测 (例如 10 秒如果没有收到任何消息)
+                const connectionTimeout = setTimeout(() => {
+                    if (eventSource.readyState !== EventSource.CLOSED) {
+                        console.error('Connection timed out');
+                        eventSource.close();
+                        fullAnswer += `\n\n*[错误：连接超时，请重试。]*`;
+                        updateBotMessage(botMessageId, fullAnswer, sources, requestId, suggestedPrompts);
+                        finishProcessing();
+                    }
+                }, 10000); // 10秒超时
+
+                eventSource.onopen = function() {
+                    console.log('Connection opened');
+                    clearTimeout(connectionTimeout);
+                };
+
+                eventSource.addEventListener('metadata', function(event) {
+                    const data = JSON.parse(event.data);
+                    requestId = data.request_id;
+                    if (requestId) {
+                        feedbackState.requestToQuery[requestId] = text;
+                        feedbackState.requestToBotId[requestId] = botMessageId;
+                    }
+                    updateBotMessage(botMessageId, fullAnswer, sources, requestId, suggestedPrompts);
+                });
+
+                eventSource.addEventListener('sources', function(event) {
+                    sources = JSON.parse(event.data);
+                    updateBotMessage(botMessageId, fullAnswer, sources, requestId, suggestedPrompts);
+                });
+
+                eventSource.addEventListener('suggested_prompts', function(event) {
+                    suggestedPrompts = JSON.parse(event.data);
+                    updateBotMessage(botMessageId, fullAnswer, sources, requestId, suggestedPrompts);
+                });
+
+                eventSource.addEventListener('content', function(event) {
+                    const content = JSON.parse(event.data);
+                    if (activeTiming && activeTiming.firstTokenTime === null) {
+                        activeTiming.firstTokenTime = performance.now();
+                    }
+                    fullAnswer += content;
+                    updateBotMessage(botMessageId, fullAnswer, sources, requestId, suggestedPrompts);
+                });
+
+                eventSource.addEventListener('server_error', function(event) {
+                    console.error('SSE Server Error:', event.data);
+                    fullAnswer += `\n\n*[服务端错误：${event.data}]*`;
+                    updateBotMessage(botMessageId, fullAnswer, sources, requestId, suggestedPrompts);
+                    eventSource.close();
+                    finishProcessing();
+                });
+
+                eventSource.onerror = function(event) {
+                    console.error('EventSource failed:', event);
+                    clearTimeout(connectionTimeout);
+                    eventSource.close();
+                    if (!fullAnswer) {
+                        fullAnswer = "*[错误：无法连接到服务器，请检查网络后重试。]*";
+                    } else {
+                        // 如果有内容，说明是正常结束（虽然 SSE 规范里正常结束也会触发 error，如果 server 关闭连接）
+                        // 更好的做法是后端发送一个 [DONE] 事件，但这里我们假设连接断开即结束
+                        // 为了区分真正的错误和结束，我们检查 fullAnswer 是否为空
+                        // 或者，我们可以在后端显式发送一个 'done' 事件
+                        // 目前简化处理：只要有内容，就认为是成功结束
+                        if (fullAnswer.length > 0) {
+                             // Success
+                        } else {
+                             fullAnswer += "\n\n*[连接已中断]*";
+                        }
+                    }
+                    updateBotMessage(botMessageId, fullAnswer, sources, requestId, suggestedPrompts);
+                    finishProcessing();
+                };
+
+            } catch (error) {
+                console.error('Chat error:', error);
+                updateBotMessage(botMessageId, `**错误：** 无法连接到服务器。\n\n_详情：${error.message}_`);
+                finishProcessing();
+            }
+        }
+
+        function finishProcessing() {
+            userInput.disabled = false;
+            sendBtn.disabled = false;
+            userInput.focus();
+            isProcessing = false;
+
+            // 结算本次响应耗时并重渲染该条消息（首字 / 总耗时）
+            if (activeTiming) {
+                const { botMessageId, startTime, firstTokenTime } = activeTiming;
+                messageTimings[botMessageId] = {
+                    total: (performance.now() - startTime) / 1000,
+                    ttft: firstTokenTime ? (firstTokenTime - startTime) / 1000 : null,
+                };
+                const snap = feedbackState.botSnapshot[botMessageId];
+                if (snap) {
+                    updateBotMessage(botMessageId, snap.content, snap.sources, snap.requestId, snap.suggestedPrompts);
+                }
+                activeTiming = null;
+            }
+        }
+
+        function createEmptyBotMessage(id) {
+            const div = document.createElement('div');
+            div.id = id;
+            div.className = 'chat-message flex justify-start mb-6 transition-colors duration-500 rounded-lg p-1';
+            div.innerHTML = `
+                <div class="w-8 h-8 bg-green-500 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold mr-3 mt-1 shadow-sm">AI</div>
+                <div class="bg-white border border-gray-200 text-gray-800 px-5 py-3 rounded-2xl rounded-tl-none max-w-[80%] shadow-sm prose prose-sm max-w-none">
+                    <div class="markdown-body"><span class="animate-pulse">▍</span></div>
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        function updateBotMessage(id, content, sources = [], requestId = null, suggestedPrompts = []) {
+            const div = document.getElementById(id);
+            if (!div) return;
+
+            feedbackState.botSnapshot[id] = {
+                content: content || '',
+                sources: sources || [],
+                requestId: requestId || null,
+                suggestedPrompts: suggestedPrompts || [],
+            };
+
+            let sourcesHtml = '';
+            if (sources && sources.length > 0) {
+                sourcesHtml = `
+                    <div class="mt-3 pt-3 border-t border-gray-100">
+                        <p class="text-xs font-semibold text-gray-500 mb-1">参考来源：</p>
+                        <div class="flex flex-wrap gap-2">
+                            ${sources.map(s => {
+                                const url = typeof s === 'string' ? s : s.url;
+                                const rawTitle = typeof s === 'string' ? '' : s.title;
+                                const label = cleanSourceTitle(rawTitle) || prettifySourceTitle(url);
+                                return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}" class="text-xs bg-gray-100 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-50 transition-colors truncate max-w-[260px] inline-block">${escapeHtml(label)}</a>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            let promptsHtml = '';
+            if (suggestedPrompts && suggestedPrompts.length > 0) {
+                promptsHtml = `
+                    <div class="mt-4 pt-3 border-t border-gray-100 animate-fadeIn">
+                        <p class="text-xs font-semibold text-gray-500 mb-2">推荐追问：</p>
+                        <div class="flex flex-wrap gap-2">
+                            ${suggestedPrompts.map(p => `<button onclick="sendPreset(this.innerText)" class="text-xs bg-indigo-50 text-indigo-700 px-3 py-2 rounded-full hover:bg-indigo-100 transition-colors border border-indigo-100 text-left cursor-pointer shadow-sm">${p}</button>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            const requestIdHtml = requestId ? `<div class="text-[10px] text-gray-300 mt-1 text-right">ID: ${requestId}</div>` : '';
+            const vote = requestId ? feedbackState.submitted[requestId] : null;
+            const feedbackHtml = requestId ? `
+                <div class="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between gap-3">
+                    <div class="text-xs text-gray-500">
+                        ${vote === 'up' ? '已记录反馈：👍 感谢！' : ''}
+                        ${vote === 'down' ? '已记录反馈：👎 感谢你的反馈。' : ''}
+                        ${!vote ? '这条回答有帮助吗？' : ''}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="copyAnswer('${requestId}')" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded">复制</button>
+                        ${!vote ? `<button onclick="sendFeedback('${requestId}', 'up')" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded">👍</button>` : ''}
+                        ${!vote ? `<button onclick="openFeedbackModal('${requestId}')" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded">👎</button>` : ''}
+                    </div>
+                </div>
+            ` : '';
+
+            // 使用 marked 解析 Markdown
+            const parsedContent = content ? marked.parse(content) : '<span class="animate-pulse">▍</span>';
+
+            const t = messageTimings[id];
+            const timingHtml = t ? `
+                <div class="mt-2 inline-flex items-center gap-1 text-[11px] text-gray-400">
+                    <span>⚡</span>
+                    <span>${t.ttft != null ? `首字 ${t.ttft.toFixed(2)}s · ` : ''}总耗时 ${t.total.toFixed(2)}s</span>
+                </div>
+            ` : '';
+
+            const contentContainer = div.querySelector('.bg-white');
+            contentContainer.innerHTML = `
+                <div class="markdown-body">${parsedContent}</div>
+                ${timingHtml}
+                ${sourcesHtml}
+                ${promptsHtml}
+                ${feedbackHtml}
+                ${requestIdHtml}
+            `;
+            
+            const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 100;
+            if (isNearBottom) {
+                scrollToBottom();
+            }
+        }
+
+        function openFeedbackModal(requestId) {
+            if (!requestId) return;
+            if (feedbackState.submitted[requestId]) return;
+            const modal = document.getElementById('feedback-modal');
+            const rid = document.getElementById('feedback-request-id');
+            const reason = document.getElementById('feedback-reason');
+            const counter = document.getElementById('feedback-count');
+            rid.textContent = requestId;
+            reason.value = '';
+            counter.textContent = `0/500`;
+            modal.classList.remove('hidden');
+            setTimeout(() => reason.focus(), 0);
+        }
+
+        function closeFeedbackModal() {
+            const modal = document.getElementById('feedback-modal');
+            modal.classList.add('hidden');
+        }
+
+        async function sendFeedback(requestId, vote, reason = null) {
+            if (!requestId) return;
+            if (feedbackState.submitted[requestId]) return;
+            const body = {
+                request_id: requestId,
+                vote,
+                reason: reason || null,
+                session_id: sessionId,
+                query: feedbackState.requestToQuery[requestId] || null,
+            };
+            try {
+                const res = await fetch('/api/v1/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                feedbackState.submitted[requestId] = vote;
+                const modal = document.getElementById('feedback-modal');
+                modal.classList.add('hidden');
+                const botId = feedbackState.requestToBotId[requestId];
+                const snap = botId ? feedbackState.botSnapshot[botId] : null;
+                if (botId && snap) {
+                    updateBotMessage(botId, snap.content, snap.sources, snap.requestId, snap.suggestedPrompts);
+                }
+                if (vote === 'up') showToast('感谢！');
+                if (vote === 'down') showToast('感谢你的反馈。');
+            } catch (e) {
+                alert('反馈提交失败，请稍后重试。');
+            }
+        }
+
+        async function copyAnswer(requestId) {
+            const botId = feedbackState.requestToBotId[requestId];
+            const snap = botId ? feedbackState.botSnapshot[botId] : null;
+            const text = snap ? (snap.content || '') : '';
+            if (!text) {
+                showToast('没有可复制的内容');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('已复制');
+            } catch (e) {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    showToast('已复制');
+                } catch (e2) {
+                    showToast('复制失败');
+                }
+            }
+        }
+
+        function showToast(text) {
+            const el = document.getElementById('toast');
+            if (!el) return;
+            el.textContent = text;
+            el.classList.remove('hidden');
+            el.classList.add('opacity-100');
+            setTimeout(() => {
+                el.classList.add('hidden');
+                el.classList.remove('opacity-100');
+            }, 1500);
+        }
+
+        function submitFeedbackDownvote() {
+            const requestId = document.getElementById('feedback-request-id').textContent;
+            const reason = document.getElementById('feedback-reason').value.trim();
+            if (reason.length > 500) return;
+            sendFeedback(requestId, 'down', reason);
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeFeedbackModal();
+            }
+        });
+    </script>
+
+    <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg opacity-100 z-[120]"></div>
+
+    <div id="feedback-modal" class="hidden fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-lg rounded-xl shadow-xl border border-gray-200">
+            <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+                <div>
+                    <div class="text-sm font-semibold text-gray-800">反馈：为什么不满意？</div>
+                    <div class="text-xs text-gray-400 mt-1">request_id: <span id="feedback-request-id" class="font-mono"></span></div>
+                </div>
+                <button onclick="closeFeedbackModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <div class="px-5 py-4">
+                <textarea id="feedback-reason" maxlength="500" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" rows="5" placeholder="最多 500 字，可选填写"></textarea>
+                <div class="mt-2 flex items-center justify-between">
+                    <div id="feedback-count" class="text-xs text-gray-400 font-mono">0/500</div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="closeFeedbackModal()" class="px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
+                        <button onclick="submitFeedbackDownvote()" class="px-3 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">提交</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const feedbackReasonEl = document.getElementById('feedback-reason');
+        const feedbackCountEl = document.getElementById('feedback-count');
+        if (feedbackReasonEl && feedbackCountEl) {
+            feedbackReasonEl.addEventListener('input', function() {
+                const len = this.value.length;
+                feedbackCountEl.textContent = `${len}/500`;
+            });
+        }
+    </script>
+</body>
+</html>
